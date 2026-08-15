@@ -6,10 +6,9 @@ import http from "http";
 import { attachSocket } from "./realtime.js";
 
 const app = express();
-app.use(cors());
+app.use(cors({origin:'https://notion-lite-client.vercel.app'}));
 app.use(express.json());
 app.use("/documents", documentsRouter);
-
 const PORT = process.env.PORT || 4000;
 const server = http.createServer(app);
 attachSocket(server);

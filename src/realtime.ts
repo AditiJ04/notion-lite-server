@@ -4,7 +4,7 @@ import * as Y from 'yjs'
 import { prisma } from './lib/prisma.js'
 
 export function attachSocket(server: http.Server) {
-  const io = new Server(server, { cors: { origin: '*' } })
+  const io = new Server(server, { cors: { origin: 'https://notion-lite-client.vercel.app' } })
 
   const docs = new Map<string, Y.Doc>()
   const dirty = new Set<string>() // tracks which documents have unsaved changes
