@@ -3,18 +3,26 @@ import http from 'http'
 import * as Y from 'yjs'
 import { prisma } from './lib/prisma.js'
 
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://notion-lite-client.vercel.app',
+]
+
 export function attachSocket(server: http.Server) {
-  const io = new Server(server, { cors: { origin: 'https://notion-lite-client.vercel.app' } })
+  const io = new Server(server, {
+    cors: {
+      origin: allowedOrigins,
+    },
+  })
 
   const docs = new Map<string, Y.Doc>()
-  const dirty = new Set<string>() // tracks which documents have unsaved changes
+  const dirty = new Set<string>()
 
   async function getDoc(documentId: string): Promise<Y.Doc> {
     if (docs.has(documentId)) return docs.get(documentId)!
 
     const doc = new Y.Doc()
 
-    // Load the most recent saved version from the DB, if one exists
     const latestVersion = await prisma.versions.findFirst({
       where: { document_id: documentId },
       orderBy: { created_at: 'desc' },
@@ -48,7 +56,6 @@ export function attachSocket(server: http.Server) {
     console.log('Saved version for document:', documentId)
   }
 
-  // Autosave every 15 seconds, only for documents with unsaved changes
   setInterval(() => {
     dirty.forEach((documentId) => saveDoc(documentId))
   }, 120000)
@@ -66,7 +73,7 @@ export function attachSocket(server: http.Server) {
     socket.on('yjs-update', async ({ documentId, update }) => {
       const doc = await getDoc(documentId)
       Y.applyUpdate(doc, new Uint8Array(update))
-      dirty.add(documentId) // mark as needing a save
+      dirty.add(documentId)
 
       socket.to(documentId).emit('yjs-update', update)
     })
