@@ -38,29 +38,31 @@ model comments {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model documents {
-  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  title         String
-  owner_id      String?         @db.Uuid
-  created_at    DateTime?       @default(now()) @db.Timestamptz(6)
-  updated_at    DateTime?       @default(now()) @db.Timestamptz(6)
-  collaborators collaborators[]
-  comments      comments[]
-  users         users?          @relation(fields: [owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  versions      versions[]
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title           String
+  owner_id        String?           @db.Uuid
+  created_at      DateTime?         @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime?         @default(now()) @db.Timestamptz(6)
+  access_requests access_requests[]
+  collaborators   collaborators[]
+  comments        comments[]
+  users           users?            @relation(fields: [owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  versions        versions[]
 
   @@index([owner_id], map: "idx_documents_owner")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model users {
-  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name          String
-  email         String          @unique
-  created_at    DateTime?       @default(now()) @db.Timestamptz(6)
-  collaborators collaborators[]
-  comments      comments[]
-  documents     documents[]
-  versions      versions[]
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String
+  email           String            @unique
+  created_at      DateTime?         @default(now()) @db.Timestamptz(6)
+  access_requests access_requests[]
+  collaborators   collaborators[]
+  comments        comments[]
+  documents       documents[]
+  versions        versions[]
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -74,4 +76,18 @@ model versions {
   documents        documents? @relation(fields: [document_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([document_id], map: "idx_versions_doc")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model access_requests {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  document_id String?    @db.Uuid
+  user_id     String?    @db.Uuid
+  status      String     @default("pending")
+  created_at  DateTime?  @default(now()) @db.Timestamptz(6)
+  documents   documents? @relation(fields: [document_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users       users?     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([document_id, user_id])
 }

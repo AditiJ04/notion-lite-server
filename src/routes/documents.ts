@@ -229,4 +229,184 @@ router.delete('/:id/collaborators/:collaboratorId', async (req: AuthedRequest, r
   res.status(204).send()
 })
 
+router.get('/:id', async (req: AuthedRequest, res) => {
+  const documentId = getDocumentId(req)
+  if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
+  if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+
+  const doc = await prisma.documents.findUnique({ where: { id: documentId } })
+  if (!doc) return res.status(404).json({ error: 'Not found' })
+
+  const isOwner = doc.owner_id === req.userId
+  const isCollaborator = await prisma.collaborators.findFirst({
+    where: { document_id: documentId, user_id: req.userId },
+  })
+
+  if (!isOwner && !isCollaborator) {
+    return res.status(403).json({ error: 'Forbidden' })
+  }
+
+  res.json(doc)
+})
+
+// POST /documents/:id/request-access — visitor requests to join
+router.post('/:id/request-access', async (req: AuthedRequest, res) => {
+  const documentId = getDocumentId(req)
+  if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
+  if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+
+  const doc = await prisma.documents.findUnique({ where: { id: documentId } })
+  if (!doc) return res.status(404).json({ error: 'Not found' })
+
+  if (doc.owner_id === req.userId) {
+    return res.status(400).json({ error: 'You already own this document' })
+  }
+  const existingCollab = await prisma.collaborators.findFirst({
+    where: { document_id: documentId, user_id: req.userId },
+  })
+  if (existingCollab) {
+    return res.status(400).json({ error: 'You already have access' })
+  }
+
+  const request = await prisma.access_requests.upsert({
+    where: { document_id_user_id: { document_id: documentId, user_id: req.userId } },
+    update: { status: 'pending' },
+    create: { document_id: documentId, user_id: req.userId, status: 'pending' },
+  })
+
+  res.status(201).json(request)
+})
+
+// GET /documents/:id/access-requests — owner views pending requests
+router.get('/:id/access-requests', async (req: AuthedRequest, res) => {
+  const documentId = getDocumentId(req)
+  if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
+  if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+
+  const doc = await prisma.documents.findUnique({ where: { id: documentId } })
+  if (doc?.owner_id !== req.userId) return res.status(403).json({ error: 'Forbidden' })
+
+  const requests = await prisma.access_requests.findMany({
+    where: { document_id: documentId, status: 'pending' },
+    include: { users: { select: { id: true, name: true, email: true } } },
+  })
+
+  res.json(requests)
+})
+
+// GET /documents/:id/my-request — the visitor checks their own request status
+router.get('/:id/my-request', async (req: AuthedRequest, res) => {
+  const documentId = getDocumentId(req)
+  if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
+  if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+
+  const request = await prisma.access_requests.findUnique({
+    where: { document_id_user_id: { document_id: documentId, user_id: req.userId } },
+  })
+
+  res.json(request ?? null)
+})
+
+// POST /documents/:id/access-requests/:requestId/approve
+router.post('/:id/access-requests/:requestId/approve', async (req: AuthedRequest, res) => {
+  const documentId = getDocumentId(req)
+  if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
+  if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+
+  const doc = await prisma.documents.findUnique({ where: { id: documentId } })
+  if (doc?.owner_id !== req.userId) return res.status(403).json({ error: 'Forbidden' })
+
+  const { requestId } = req.params
+  if (typeof requestId !== 'string') return res.status(400).json({ error: 'Invalid request id' })
+
+  const request = await prisma.access_requests.findUnique({ where: { id: requestId } })
+  if (!request || request.document_id !== documentId) {
+    return res.status(404).json({ error: 'Not found' })
+  }
+
+  await prisma.access_requests.update({
+    where: { id: requestId },
+    data: { status: 'approved' },
+  })
+
+  const collaborator = await prisma.collaborators.create({
+    data: { document_id: documentId, user_id: request.user_id, role: 'editor' },
+  })
+
+  res.json(collaborator)
+})
+
+// POST /documents/:id/access-requests/:requestId/deny
+router.post('/:id/access-requests/:requestId/deny', async (req: AuthedRequest, res) => {
+  const documentId = getDocumentId(req)
+  if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
+  if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+
+  const doc = await prisma.documents.findUnique({ where: { id: documentId } })
+  if (doc?.owner_id !== req.userId) return res.status(403).json({ error: 'Forbidden' })
+
+  const { requestId } = req.params
+  if (typeof requestId !== 'string') return res.status(400).json({ error: 'Invalid request id' })
+
+  const request = await prisma.access_requests.findUnique({ where: { id: requestId } })
+  if (!request || request.document_id !== documentId) {
+    return res.status(404).json({ error: 'Not found' })
+  }
+
+  await prisma.access_requests.update({
+    where: { id: requestId },
+    data: { status: 'denied' },
+  })
+
+  res.json({ ok: true })
+})
+
+
+// DELETE /documents/:id/versions/:versionId
+router.delete('/:id/versions/:versionId', async (req: AuthedRequest, res) => {
+  const documentId = getDocumentId(req)
+  if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
+  if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+
+  const doc = await prisma.documents.findUnique({ where: { id: documentId } })
+  if (doc?.owner_id !== req.userId) return res.status(403).json({ error: 'Forbidden' })
+
+  const { versionId } = req.params
+  if (typeof versionId !== 'string') return res.status(400).json({ error: 'Invalid version id' })
+
+  const version = await prisma.versions.findUnique({ where: { id: versionId } })
+  if (!version || version.document_id !== documentId) {
+    return res.status(404).json({ error: 'Not found' })
+  }
+
+  await prisma.versions.delete({ where: { id: versionId } })
+  res.status(204).send()
+})
+
+// DELETE /documents/:id/comments/:commentId
+router.delete('/:id/comments/:commentId', async (req: AuthedRequest, res) => {
+  const documentId = getDocumentId(req)
+  if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
+  if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
+
+  const { commentId } = req.params
+  if (typeof commentId !== 'string') return res.status(400).json({ error: 'Invalid comment id' })
+
+  const comment = await prisma.comments.findUnique({ where: { id: commentId } })
+  if (!comment || comment.document_id !== documentId) {
+    return res.status(404).json({ error: 'Not found' })
+  }
+
+  // Allow deletion if: the requester wrote the comment, OR owns the document
+  const doc = await prisma.documents.findUnique({ where: { id: documentId } })
+  const isCommentAuthor = comment.user_id === req.userId
+  const isDocOwner = doc?.owner_id === req.userId
+
+  if (!isCommentAuthor && !isDocOwner) {
+    return res.status(403).json({ error: 'Forbidden' })
+  }
+
+  await prisma.comments.delete({ where: { id: commentId } })
+  res.status(204).send()
+})
 export default router
