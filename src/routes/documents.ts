@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import  { requireAuth} from '../middleware/auth.js'
 import type{ AuthedRequest } from '../middleware/auth.js'
+import { getDocumentAccess } from '../services/documentAccess.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -44,10 +45,13 @@ const getDocumentId = (req: AuthedRequest): string | undefined => {
 router.get('/:id', async (req: AuthedRequest, res) => {
   const documentId = getDocumentId(req)
   if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
+  if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
 
-  const doc = await prisma.documents.findUnique({ where: { id: documentId } })
-  if (!doc) return res.status(404).json({ error: 'Not found' })
-  res.json(doc)
+  const { document, role } = await getDocumentAccess(documentId, req.userId)
+  if (!document) return res.status(404).json({ error: 'Not found' })
+  if (!role) return res.status(403).json({ error: 'Forbidden' })
+
+  res.json(document)
 })
 
 // PATCH /documents/:id — update the title (only if the requester owns it)
@@ -227,26 +231,6 @@ router.delete('/:id/collaborators/:collaboratorId', async (req: AuthedRequest, r
 
   await prisma.collaborators.delete({ where: { id: collaboratorId } })
   res.status(204).send()
-})
-
-router.get('/:id', async (req: AuthedRequest, res) => {
-  const documentId = getDocumentId(req)
-  if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
-  if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
-
-  const doc = await prisma.documents.findUnique({ where: { id: documentId } })
-  if (!doc) return res.status(404).json({ error: 'Not found' })
-
-  const isOwner = doc.owner_id === req.userId
-  const isCollaborator = await prisma.collaborators.findFirst({
-    where: { document_id: documentId, user_id: req.userId },
-  })
-
-  if (!isOwner && !isCollaborator) {
-    return res.status(403).json({ error: 'Forbidden' })
-  }
-
-  res.json(doc)
 })
 
 // POST /documents/:id/request-access — visitor requests to join
