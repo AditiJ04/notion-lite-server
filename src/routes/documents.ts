@@ -3,6 +3,8 @@ import { prisma } from '../lib/prisma.js'
 import  { requireAuth} from '../middleware/auth.js'
 import type{ AuthedRequest } from '../middleware/auth.js'
 import { getDocumentAccess } from '../services/documentAccess.js'
+import { approveAccessRequest } from '../services/accessRequests.js'
+import { requireDocumentAccess } from '../middleware/documentAccess.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -100,7 +102,7 @@ router.post('/:id/collaborators', async (req: AuthedRequest, res) => {
 })
 
 // GET /documents/:id/versions — list version history
-router.get('/:id/versions', async (req: AuthedRequest, res) => {
+router.get('/:id/versions', requireDocumentAccess, async (req: AuthedRequest, res) => {
   const documentId = getDocumentId(req)
   if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
 
@@ -115,7 +117,7 @@ router.get('/:id/versions', async (req: AuthedRequest, res) => {
 })
 
 // GET /documents/:id/versions/:versionId — get one version's content (for restore)
-router.get('/:id/versions/:versionId', async (req: AuthedRequest, res) => {
+router.get('/:id/versions/:versionId', requireDocumentAccess, async (req: AuthedRequest, res) => {
   const documentId = getDocumentId(req)
   if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
 
@@ -137,7 +139,7 @@ router.get('/:id/versions/:versionId', async (req: AuthedRequest, res) => {
 
 
 // GET /documents/:id/comments — list comments for a document
-router.get('/:id/comments', async (req: AuthedRequest, res) => {
+router.get('/:id/comments', requireDocumentAccess, async (req: AuthedRequest, res) => {
   const documentId = getDocumentId(req)
   if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
 
@@ -149,7 +151,7 @@ router.get('/:id/comments', async (req: AuthedRequest, res) => {
 })
 
 // POST /documents/:id/comments — add a comment
-router.post('/:id/comments', async (req: AuthedRequest, res) => {
+router.post('/:id/comments', requireDocumentAccess, async (req: AuthedRequest, res) => {
   const documentId = getDocumentId(req)
   if (!documentId) return res.status(400).json({ error: 'Invalid document id' })
   if (!req.userId) return res.status(401).json({ error: 'Unauthorized' })
@@ -303,19 +305,8 @@ router.post('/:id/access-requests/:requestId/approve', async (req: AuthedRequest
   const { requestId } = req.params
   if (typeof requestId !== 'string') return res.status(400).json({ error: 'Invalid request id' })
 
-  const request = await prisma.access_requests.findUnique({ where: { id: requestId } })
-  if (!request || request.document_id !== documentId) {
-    return res.status(404).json({ error: 'Not found' })
-  }
-
-  await prisma.access_requests.update({
-    where: { id: requestId },
-    data: { status: 'approved' },
-  })
-
-  const collaborator = await prisma.collaborators.create({
-    data: { document_id: documentId, user_id: request.user_id, role: 'editor' },
-  })
+  const collaborator = await approveAccessRequest(documentId, requestId)
+  if (!collaborator) return res.status(404).json({ error: 'Not found' })
 
   res.json(collaborator)
 })
